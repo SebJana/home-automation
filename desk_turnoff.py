@@ -13,7 +13,7 @@ PC_IP_LAN = "192.168.178.38"
 # Retry interval
 RETRY_INTERVAL = 5 * 60 # 5 minutes
 # Turn-off/-on time
-TURN_OFF_TIME = dtime(19, 0)  # 22:00
+TURN_OFF_TIME = dtime(22, 0)  # 22:00
 TURN_ON_TIME = dtime(8, 0)    # 08:00
 # Counter of consecutive unsuccessful PC pings
 NOT_REACHED_PING_COUNTER = 0
