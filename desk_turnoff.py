@@ -11,7 +11,7 @@ SHELLY_IP = "192.168.178.114"
 PC_IP_WIFI = "192.168.178.112"
 PC_IP_LAN = "192.168.178.38"
 # Retry interval
-RETRY_INTERVAL = 5 * 60 # 5 minutes
+RETRY_INTERVAL = 5 * 60  # 5 minutes
 # Turn-off/-on time
 TURN_OFF_TIME = dtime(22, 0)  # 22:00
 TURN_ON_TIME = dtime(8, 0)    # 08:00
@@ -22,8 +22,7 @@ def is_shelly_on(shelly_ip):
     url = f"http://{shelly_ip}/relay/0"
     response = requests.get(url)
     data = response.json()
-
-    return data["ison"] 
+    return data["ison"]
 
 def turn_off_shelly(shelly_ip):
     url = f"http://{shelly_ip}/relay/0?turn=off"
@@ -33,15 +32,17 @@ def turn_off_shelly(shelly_ip):
 def is_reachable(host):
     param = "-n" if platform.system().lower() == "windows" else "-c"
     command = ["ping", param, "1", host]
+    
+    print(f"Trying to ping {host}...") 
     try:
         result = subprocess.run(
             command,
-            capture_output=True,  
-            text=True,            
-            timeout=3             
+            capture_output=True,
+            text=True,
+            timeout=5
         )
         output = result.stdout.lower()
-
+        print(output)
         if "unreachable" in output or "timed out" in output:
             return False
         return True
@@ -52,15 +53,18 @@ def is_reachable(host):
 def is_night_time():
     now = datetime.now().time()
     if TURN_OFF_TIME < TURN_ON_TIME:
-        # Normal same-day range (e.g. 20:00–08:00 is invalid)
+        # Normal same-day range (e.g. 20:00?08:00 is invalid)
         return TURN_OFF_TIME <= now < TURN_ON_TIME
     else:
-        # Overnight range (e.g. 22:00–08:00)
+        # Overnight range (e.g. 22:00?08:00)
         return now >= TURN_OFF_TIME or now < TURN_ON_TIME
 
 while True:
-    # Check if it's nighttime yet
+    print("Check Loop running...")
+
+    # Check if it's night time
     if not is_night_time():
+        print("Not night time yet!")
         time.sleep(RETRY_INTERVAL)
         continue
 
@@ -70,11 +74,12 @@ while True:
         NOT_REACHED_PING_COUNTER = 0
     else:
         NOT_REACHED_PING_COUNTER += 1
-    
+
     # PC offline for 3 or more iterations
     if NOT_REACHED_PING_COUNTER >= 3:
         if is_shelly_on(SHELLY_IP):
             turn_off_shelly(SHELLY_IP)
         sys.exit()
-
+	
+    print("Sleeping till next ping...")
     time.sleep(RETRY_INTERVAL)
