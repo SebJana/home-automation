@@ -1,17 +1,16 @@
 #include <Arduino.h>
-#include <Arduino.h>
+#include <cstdlib> 
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
 
 #include <WiFi.h>
 #include <time.h>
 #include "wifi_config.h"
+#include "timeutil.h"
 
-#define IR_SEND_PIN 23  // Passenden Pin für deinen IR LED-Sender wählen
+#define IR_SEND_PIN 23  // IR-Sender Pin
 
 IRsend irsend(IR_SEND_PIN);
-
-uint32_t reverseBits(uint32_t value);
 
 struct IRCode {
   const char* name;
@@ -31,8 +30,11 @@ const IRCode ir_codes[] = {
 };
 
 const int IR_CODES_COUNT = sizeof(ir_codes) / sizeof(ir_codes[0]);
+const int NOON_SEC = 12 * 3600; // Seconds since Midnight that equal '12:00' 
+const int WAITING_INTERVAL = 1000; // Milliseconds to wait in-between sending IR-codes
 
 uint32_t getIRCode(const char* name);
+uint32_t reverseBits(uint32_t value);
 
 void setup() {
   Serial.begin(115200);
@@ -71,67 +73,92 @@ void setup() {
 }
 
 void loop() {
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
+  struct tm time;
+  if (!getLocalTime(&time)) {
     Serial.println("Time not available");
     return;
   }
 
-  // 1) Berechne Sekunden seit Mitternacht und Noon-Offset
-  int nowSec   = timeinfo.tm_hour * 3600 
-               + timeinfo.tm_min  *   60 
-               + timeinfo.tm_sec;
-  const int noonSec = 12 * 3600;       // 12:00 Uhr
+  // Calc the offset from '12:00' (Noon)
+  int nowSec = getSecondsSinceMidnight(time); // Seconds since Midnight
+  int deltaSec = nowSec - NOON_SEC; // >0 after noon, <0 before noon
 
-  int deltaSec = nowSec - noonSec;      // >0 nach Mittag, <0 vor Mittag
-  bool afterNoon = (deltaSec >= 0);
-  int absSec = afterNoon ? deltaSec : -deltaSec;
+  int diffH = calculateHourDifference(deltaSec);
+  int diffM = calculateMinuteDifference(deltaSec);
 
-  // Stunden und Minuten Unterschied
-  int diffH = absSec / 3600;
-  int diffM = (absSec % 3600) / 60;
-
-  // Debug
-  if (afterNoon) {
-    Serial.printf("Seit 12:00: %d h, %d m\n", diffH, diffM);
-  } else {
-    Serial.printf("Bis 12:00: %d h, %d m\n", diffH, diffM);
+  // Need to set clock to one "less" hour if its before noon
+  if (diffH < 0 && diffM != 0){
+    diffH = diffH - 1;
   }
 
-  // 2) Codes vorbereiten
+  // Debug
+  Serial.printf("%d h, %d m\n", diffH, diffM);
+
+  // Prepare codes
   uint32_t codeClock     = reverseBits(getIRCode("CLOCK"));
   uint32_t codeUp        = reverseBits(getIRCode("ARROW_UP"));
   uint32_t codeDown      = reverseBits(getIRCode("ARROW_DOWN"));
   uint32_t codeRight     = reverseBits(getIRCode("ARROW_RIGHT"));
 
-  // 3) In Clock-Setting-Modus wechseln
-  irsend.sendNEC(codeClock, 32);
-  delay(200);
+  // Switch from AM/PM to 24h Clock
+  irsend.sendNEC(codeUp, 32);
+  delay(WAITING_INTERVAL);
 
-  // 4) Stunden einstellen
-  for (int i = 0; i <= diffH; i++) {
-    irsend.sendNEC(afterNoon ? codeUp : codeDown, 32);
-    delay(100);
+  // Enable clock setting mode
+  irsend.sendNEC(codeClock, 32);
+  delay(WAITING_INTERVAL);
+
+  // Set hours
+  for (int i = 0; i < std::abs(diffH); i++) {
+    if(diffH < 0){
+      irsend.sendNEC(codeDown, 32);
+    }
+    if(diffH > 0){
+      irsend.sendNEC(codeUp, 32);
+    }
+    delay(WAITING_INTERVAL);
   }
 
-  // 5) Auf Minuten-Modus umschalten
+  delay(WAITING_INTERVAL);
+  delay(WAITING_INTERVAL);
+  // Switch to minute-setting mode
   irsend.sendNEC(codeRight, 32);
-  delay(200);
+  delay(WAITING_INTERVAL);
 
-  // 6) Minuten einstellen
-  for (int i = 0; i <= diffM; i++) {
-    irsend.sendNEC(afterNoon ? codeUp : codeDown, 32);
-    delay(100);
+  // Setting Minutes -40 mins is the same as setting +20 mins
+  // Determine which one requires less steps
+  int minuteSteps = diffM;
+  int changedDirectionSteps = 0;
+  if(diffM < 0){
+    changedDirectionSteps = 60 + diffM; // e.g 60 + (-40) = +20
+  }
+  if(diffM > 0){
+    changedDirectionSteps = -(60 - diffM); // e.g -(60 - (+40)) = -20
   }
 
-  // 7) Einstell-Modus verlassen / speichern
-  irsend.sendNEC(codeClock, 32);
-  delay(200);
+  // Choose changed direction if it requires less steps
+  if(std::abs(changedDirectionSteps) < std::abs(diffM)){
+    minuteSteps = changedDirectionSteps;
+  }
 
-  irsend.sendNEC(codeClock, 32);
-  delay(200);
+  // Set minutes
+  for (int i = 0; i < std::abs(minuteSteps); i++) {
+    if(minuteSteps < 0){
+      irsend.sendNEC(codeDown, 32);
+    }
+    if(minuteSteps > 0){
+      irsend.sendNEC(codeUp, 32);
+    }
+    delay(WAITING_INTERVAL);
+  }
 
-  // 8) Sleep oder nächste Iteration
+  // Leave clock settings (skip date setting for now)
+  irsend.sendNEC(codeClock, 32);
+  delay(WAITING_INTERVAL);
+  irsend.sendNEC(codeClock, 32);
+  delay(WAITING_INTERVAL);
+  irsend.sendNEC(codeClock, 32);
+
   delay(100000000);
 }
 
@@ -145,6 +172,7 @@ uint32_t reverseBits(uint32_t value) {
   return reversed;
 }
 
+// Look-up the corresponding code for a button
 uint32_t getIRCode(const char* name) {
   for (int i = 0; i < IR_CODES_COUNT; i++) {
     if (strcmp(ir_codes[i].name, name) == 0) {
