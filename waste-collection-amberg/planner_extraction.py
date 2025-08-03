@@ -1,12 +1,15 @@
 import easyocr
-from PIL import ImageEnhance
+from PIL import Image, ImageEnhance
 import numpy as np
 import pandas as pd
 from pdf2image import convert_from_path
+import os
 
 # Load and crop the pdf
-def load_pdf_image(pdf_path, box_coords):
-    images = convert_from_path(pdf_path, dpi=300)
+def load_pdf_image(pdf_name, box_coords):
+    file_path = os.path.join("resources", "pdf-waste-collection-plans", pdf_name)
+
+    images = convert_from_path(file_path, dpi=300)
     img = images[0]
     cropped = img.crop(box_coords)
     return cropped
@@ -36,13 +39,19 @@ def extract_cells(image, months, rows=31, cols=6, lang=['de', 'en']):
             bottom = (row + 1) * row_height
 
             cell_img = image.crop((left, top, right, bottom))
-            cell_np = np.array(cell_img)
+            # Increase image scale for better small character extraction
+            scale_factor = 2
+            cell_upscaled = cell_img.resize(
+                (cell_img.width * scale_factor, cell_img.height * scale_factor),
+                resample=Image.BICUBIC
+            )
+            cell_np = np.array(cell_upscaled)
 
             if cell_np.size == 0:
                 continue
 
             cell_text = reader.readtext(cell_np, detail=0)
-            joined_text = " ".join(cell_text).strip()
+            joined_text = " ".join(cell_text).strip().split()
 
             entries.append({
                 "Month": months[col],
@@ -53,12 +62,12 @@ def extract_cells(image, months, rows=31, cols=6, lang=['de', 'en']):
     return entries
 
 # Run full extraction process
-def run_extraction(pdf_path, box_coords, csv_path, months=None):
+def run_extraction(pdf_name, box_coords, csv_name, months=None):
     if months is None:
         months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"]
 
-    print(f"📄 Loading PDF: {pdf_path}")
-    img = load_pdf_image(pdf_path, box_coords)
+    print(f"📄 Loading PDF: {pdf_name}")
+    img = load_pdf_image(pdf_name, box_coords)
 
     print("🧪 Preprocessing...")
     processed = preprocess_image(img)
@@ -66,9 +75,11 @@ def run_extraction(pdf_path, box_coords, csv_path, months=None):
     print("🔍 OCR per Cell...")
     entries = extract_cells(processed, months)
 
-    print(f"💾 Saved as: {csv_path}")
+    print(f"💾 Saved as: {csv_name}")
     df = pd.DataFrame(entries)
-    df.to_csv(csv_path, index=False)
+
+    file_path = os.path.join("resources", "ocr-results", csv_name)
+    df.to_csv(file_path, index=False)
     return df
 
 # IMPORTANT: 
@@ -78,19 +89,20 @@ def run_extraction(pdf_path, box_coords, csv_path, months=None):
 
 '''
 Run this after getting the new pdf calenders 
+Change year to year of calender
 '''
 # Jan - Jun
 run_extraction(
-    pdf_path="Abfuhrplan_Januar_bis_Juni.pdf",
+    pdf_name="Abfuhrplan_Januar_bis_Juni.pdf",
     box_coords=(135, 320, 3375, 2255),
-    csv_path="waste-collection-01_06.csv",
+    csv_name="waste-collection-01_06_2025.csv",
     months=["Jan", "Feb", "Mar", "Apr", "May", "Jun"]
 )
 
 # Jul - Dec
 run_extraction(
-    pdf_path="Abfuhrplan_Juli_bis_Dezember.pdf",
+    pdf_name="Abfuhrplan_Juli_bis_Dezember.pdf",
     box_coords=(122, 320, 3385, 2258),
-    csv_path="waste-collection-07_12.csv",
+    csv_name="waste-collection-07_12_2025.csv",
     months=["Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 )
