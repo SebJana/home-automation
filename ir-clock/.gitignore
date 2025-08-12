@@ -3,6 +3,6 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-*/wifi_config.h
-*/wifi/wifi_config.h
 .vscode/settings.json
+wifi_config.h
+mqtt_config.h
