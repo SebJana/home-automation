@@ -2,6 +2,7 @@
 #include <cstdlib> 
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
+#include "DHT.h"
 
 #include <WiFi.h>
 #include <time.h>
@@ -10,6 +11,10 @@
 
 #define IR_SEND_PIN 23  // IR-Sender Pin
 
+#define DHTPIN 19     // Temp-Sensor Pin
+#define DHTTYPE DHT11 // Sensor type
+
+DHT dht(DHTPIN, DHTTYPE);
 IRsend irsend(IR_SEND_PIN);
 
 struct IRCode {
@@ -76,8 +81,8 @@ void setup() {
   Serial.println("NTP configured, waiting for time...");
 
   // Wait till a valid time is received
-  struct tm timeinfo;
-  while (!getLocalTime(&timeinfo)) {
+  struct tm time;
+  while (!getLocalTime(&time)) {
     delay(500);
   }
   Serial.println("Time synchronized!");
@@ -88,28 +93,42 @@ void setup() {
   irsend.begin();
   Serial.println("IR-Sender ready");
 
+  // Temp Sensor Setup
+  dht.begin();
+  Serial.println("Temp Sensor ready");
+
   // Prepare Infrared Codes
   codeClock = reverseBits(getIRCode("CLOCK"));
   codeUp    = reverseBits(getIRCode("ARROW_UP"));
   codeDown  = reverseBits(getIRCode("ARROW_DOWN"));
   codeRight = reverseBits(getIRCode("ARROW_RIGHT"));
-}
 
-void loop() {
-  struct tm time;
-  if (!getLocalTime(&time)) {
-    Serial.println("Time not available");
-    return;
-  }
-
+  // Set the clock to the current time
   setClockToCurrentTime(time);
 
   // Leave clock settings (skip date setting for now)
   for(int i = 0; i < 3; i++){
     sendCode(codeClock);
   }
+}
 
-  delay(100000000);
+void loop() {
+  float temp = dht.readTemperature(); // Celsius
+  float hum  = dht.readHumidity();    // %
+
+  if (isnan(temp) || isnan(hum)) {
+    Serial.println("❌ Error reading data from sensor");
+  } else {
+    Serial.print("🌡 Temperature: ");
+    Serial.print(temp);
+    Serial.println(" °C");
+
+    Serial.print("💧 Humidity: ");
+    Serial.print(hum);
+    Serial.println(" %");
+  }
+
+  delay(2000); // DHT11 nur alle 1-2s abfragen
 }
 
 // Reverse the bits of the code to be sent
