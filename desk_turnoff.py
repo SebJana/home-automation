@@ -12,11 +12,14 @@ PC_IP_WIFI = "192.168.178.112"
 PC_IP_LAN = "192.168.178.38"
 # Retry interval
 RETRY_INTERVAL = 5 * 60  # 5 minutes
+# If that amount or more is used, PC is still on
+POWER_THRESHOLD = 150  # Watts
 # Turn-off/-on time
 TURN_OFF_TIME = dtime(22, 0)  # 22:00
-TURN_ON_TIME = dtime(8, 0)    # 08:00
+TURN_ON_TIME = dtime(8, 0)  # 08:00
 # Counter of consecutive unsuccessful PC pings
 NOT_REACHED_PING_COUNTER = 0
+
 
 def is_shelly_on(shelly_ip):
     url = f"http://{shelly_ip}/relay/0"
@@ -24,23 +27,33 @@ def is_shelly_on(shelly_ip):
     data = response.json()
     return data["ison"]
 
+
+def get_shelly_watts(shelly_ip):
+    url = f"http://{shelly_ip}/rpc/Shelly.GetStatus"
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        watts = data.get("switch:0", {}).get("apower")
+        return watts  # in W
+    except Exception as e:
+        print(f"Error getting Shelly power: {e}")
+        return 0 # Default to no power consumption
+
+
 def turn_off_shelly(shelly_ip):
     url = f"http://{shelly_ip}/relay/0?turn=off"
     response = requests.get(url)
     print("Response:", response.text)
 
+
 def is_reachable(host):
     param = "-n" if platform.system().lower() == "windows" else "-c"
     command = ["ping", param, "1", host]
-    
-    print(f"Trying to ping {host}...") 
+
+    print(f"Trying to ping {host}...")
     try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
+        result = subprocess.run(command, capture_output=True, text=True, timeout=5)
         output = result.stdout.lower()
         print(output)
         if "unreachable" in output or "timed out" in output:
@@ -50,6 +63,7 @@ def is_reachable(host):
         print(f"Error pinging {host}: {e}")
         return False
 
+
 def is_night_time():
     now = datetime.now().time()
     if TURN_OFF_TIME < TURN_ON_TIME:
@@ -58,6 +72,7 @@ def is_night_time():
     else:
         # Overnight range (e.g. 22:00?08:00)
         return now >= TURN_OFF_TIME or now < TURN_ON_TIME
+
 
 while True:
     print("Check Loop running...")
@@ -69,7 +84,11 @@ while True:
         continue
 
     # Check if the PC is in use
-    if is_reachable(PC_IP_WIFI) or is_reachable(PC_IP_LAN):
+    if (
+        get_shelly_watts(SHELLY_IP) >= POWER_THRESHOLD
+        or is_reachable(PC_IP_WIFI)
+        or is_reachable(PC_IP_LAN)
+    ):
         PC_LAST_REACHED = time.time()
         NOT_REACHED_PING_COUNTER = 0
     else:
@@ -80,6 +99,6 @@ while True:
         if is_shelly_on(SHELLY_IP):
             turn_off_shelly(SHELLY_IP)
         sys.exit()
-	
+
     print("Sleeping till next ping...")
     time.sleep(RETRY_INTERVAL)
